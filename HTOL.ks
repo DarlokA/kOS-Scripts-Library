@@ -3,18 +3,28 @@ ClearScreen.
 local G is 0.
 lock G to SHIP:BODY:MU / ((SHIP:BODY:RADIUS+SHIP:ALTITUDE)^2).
 
+local oldTimeS to TIME:SECONDS.
+
+local oldRoll to get_roll().
+local oldPitch to get_pitch().
+
+local RollSpeed to 0.
+local PitchSpeed to 0.
+
+local tgt_pitch TO get_pitch().
+local tgt_roll TO get_roll().
+
 
 GLOBAL hLock TO false.
 GLOBAL exit to false.
 
-LOCAL APM_NONE 			TO 0.
-LOCAL APM_PRELAUNCH 	TO 1.
-LOCAL APM_VTLAUNCH 		TO 2.
-LOCAL APM_HTLAUNCH 		TO 3.
+GLOBAL APM_NONE 			TO 0.
+GLOBAL APM_PRELAUNCH 		TO 1.
+GLOBAL APM_VTLAUNCH 		TO 2.
+GLOBAL APM_HTLAUNCH 		TO 3.
 
 GLOBAL apm TO APM_NONE.
 GLOBAL ap_stage TO 0.
-GLOBAL tgt_pitch TO get_pitch().
 
 
 
@@ -32,144 +42,145 @@ WHEN TERMINAL:INPUT:HASCHAR THEN{
 	PRESERVE.
 }
 
-function vec_drw{
-	parameter __vector to ship:up:vector, __start to V(0, 0, 0), __color to RGB(1, 1, 1).
-	local drw to vecdraw().
-	set drw:start to __start.
-	set drw:vec to __vector.
-	set drw:color to __color.
-	set drw:show to TRUE.
-	return drw.
-}
-
-HUDTEXT("Ship status: "+SHIP:STATUS, 10, 2, 30, GREEN, TRUE).
+HUDTEXT("Ship status: "+SHIP:STATUS, 10, 2, 30, GREEN, FALSE).
 
 local VTOLs to SHIP:partsdubbed("vtol").
 local MTs to SHIP:partsdubbed("mt").
 
+ON_APM_NONE(true).
+
+UI(true).
+
 until exit
 {
+	updateState().
+	
+	if apm = APM_NONE ON_APM_NONE(false).
+	
+	if SHIP:CONTROL:PILOTFORE > 0.5	on_holdHE().
+	if SHIP:CONTROL:PILOTFORE < -0.5 on_holdHD().
+	
+	if hLock process_horizontal_lock(tgt_pitch, 0).
+	
+	if apm = APM_PRELAUNCH ON_APM_PRELAUNCH().
+		
+	if apm = APM_VTLAUNCH ON_APM_VTLAUNCH().
+}
 
-	if apm = APM_NONE
+clearvecdraws().
+
+//FUNCTIONS====================================================================
+
+function ON_APM_NONE{
+	PARAMETER showHUD.
+	if showHUD
 	{
 		local vt to not is_engines_cut_off(VTOLs).
 		local mt to not is_engines_cut_off(MTs).
 		if is_landed() and not mt and not vt
 		{ 
 			SET apm TO APM_PRELAUNCH.
-			HUDTEXT("Ship status: "+ SHIP:STATUS, 10, 2, 30, GREEN, TRUE).
-			HUDTEXT("Activate VTOL engine(s) for VERTICAL LAUNCH", 10, 2, 30, GREEN, TRUE).
-			HUDTEXT("Activate MAIN engine(s) for HORIZONTAL LAUNCH", 10, 2, 30, GREEN, TRUE).
+			HUDTEXT("Ship status: "+ SHIP:STATUS, 10, 2, 30, GREEN, FALSE).
+			HUDTEXT("Activate VTOL engine(s) for VERTICAL LAUNCH", 10, 2, 30, GREEN, FALSE).
+			HUDTEXT("Activate MAIN engine(s) for HORIZONTAL LAUNCH", 10, 2, 30, GREEN, FALSE).
 		}
-	}
-	
-	if SHIP:CONTROL:PILOTFORE > 0.5
-	{
-		on_holdHE().
-	}
-	if SHIP:CONTROL:PILOTFORE < -0.5
-	{
-		on_holdHD().
-	}
-	
-	if hLock {
-		process_horizontal_lock(tgt_pitch, 0).
-	}
-	
-	if apm = APM_PRELAUNCH
-	{
-		wait 1.
-		local mt to not is_engines_cut_off(MTs).
-		local vt to not is_engines_cut_off(VTOLs).
-		if vt 
-		{
-			SET apm TO APM_VTLAUNCH.
-			HUDTEXT("PROCESS VERTICAL LAUNCH", 10, 2, 30, GREEN, TRUE).
-		}else if mt
-		{
-			SET apm TO APM_HTLAUNCH.
-			HUDTEXT("PROCESS HORIZONTAL LAUNCH", 10, 2, 30, GREEN, TRUE).
-		}		
-	}	
-	
-	
-	if apm = APM_VTLAUNCH{
-	
-		//if SHIP:BOUNDS:BOTTOMALTRADAR > 0 
-		set tgt_pitch to get_pitch().
-		process_horizontal_lock(tgt_pitch, 0).
-		
-		if ap_stage = 0
-		{
-			SET tgt_pitch to 0.
-			BRAKES ON.
-			set SHIP:control:pilotmainthrottle to 0.
-			set ap_stage to 1.
-			HUDTEXT("WAITING BRAKES.", 10, 2, 30, GREEN, TRUE).
-		}
-			
-			if ap_stage = 1 
-			{
-				if SHIP:VELOCITY:SURFACE:MAG < 1
-				{
-					for _e in VTOLs{ SET _e:THRUSTLIMIT TO 100.}
-					set SHIP:control:pilotmainthrottle to ThrottleToTWR(2, VTOLs).
-					SET ap_stage to 2.
-					BRAKES OFF.
-					HUDTEXT("WAIT FOR TAKE OFF.", 10, 2, 30, GREEN, TRUE).
-				}
-			}
-		
-		if ap_stage = 2
-		{
-			if SHIP:BOUNDS:BOTTOMALTRADAR > 1
-			{
-				set SHIP:control:pilotmainthrottle to ThrottleToTWR(1.5, VTOLs).
-				SET ap_stage to 3.
-				HUDTEXT("WAITING FOR A SAFE ALTITUDE ON THE RADAR: 20m", 10, 2, 30, GREEN, TRUE).
-			}
-		}
-		if ap_stage = 3 
-		{
-			if SHIP:BOUNDS:BOTTOMALTRADAR > 20
-			{
-				HUDTEXT("ACTIVATE MAIN ENGINE", 10, 2, 30, GREEN, TRUE).
-				for _e in VTOLs
-				{
-					SET _e:THRUSTLIMIT TO ThrottleToTWR(1.0, VTOLs) * 100.
-				}
-				SET ap_stage to 4.
-				SET tgt_pitch to 5.
-				HUDTEXT("WAITING FOR A SAFE ALTITUDE ON THE RADAR 100m", 10, 2, 30, GREEN, TRUE).
-				HUDTEXT("WAITING FOR SPEED TO CLIMB 80m/s", 10, 2, 30, GREEN, TRUE).
-			}
-		}
-		
-		if ap_stage = 4
-		{
-			for _e in VTOLs{ 
-				SET _e:THRUSTLIMIT TO ThrottleToTWR(max(1, min(50 - SHIP:GROUNDSPEED/50, 0)), VTOLs) * 100.
-			}
-			if SHIP:VELOCITY:SURFACE:MAG > 80 and SHIP:BOUNDS:BOTTOMALTRADAR > 100
-			{
-				//SET tgt_pitch to 10.
-				SET ap_stage TO 0.
-				SET apm TO APM_NONE.
-				HUDTEXT("DEACTIVATE HOVER ENGINE", 10, 2, 30, GREEN, TRUE).
-				for _e in VTOLs{ 
-					SET _e:THRUSTLIMIT TO 0.
-				}
-				HUDTEXT("VERTICAL LAUNCH COMPLETE", 10, 2, 30, GREEN, TRUE).
-				SET tgt_pitch to 0.
-				set SHIP:CONTROL:NEUTRALIZE TO TRUE.
-			}
-		}		
-		
 	}
 }
 
-clearvecdraws().
+function ON_APM_PRELAUNCH{
+	local mt to not is_engines_cut_off(MTs).
+	local vt to not is_engines_cut_off(VTOLs).
+	if vt 
+	{
+		SET apm TO APM_VTLAUNCH.
+		HUDTEXT("PROCESS VERTICAL LAUNCH", 10, 2, 30, GREEN, FALSE).
+	}else if mt
+	{
+		SET apm TO APM_HTLAUNCH.
+		HUDTEXT("PROCESS HORIZONTAL LAUNCH", 10, 2, 30, GREEN, FALSE).
+	}
+}
 
+function ON_APM_HTLAUNCH{
+	if SHIP:VELOCITY:SURFACE:MAG > 80 and SHIP:BOUNDS:BOTTOMALTRADAR > 100
+	{
+		HUDTEXT("HORIZONTAL LAUNCH COMPLETE", 10, 2, 30, GREEN, FALSE).
+		SET ap_stage TO 0.
+		SET apm TO APM_NONE.
+		set SHIP:CONTROL:NEUTRALIZE TO TRUE.
+	}
+}
+
+function ON_APM_VTLAUNCH{
+	set tgt_pitch to oldPitch.
+	process_horizontal_lock(tgt_pitch, 0).
+	
+	if ap_stage = 0
+	{
+		SET tgt_pitch to 0.
+		BRAKES ON.
+		set SHIP:control:pilotmainthrottle to 0.
+		set ap_stage to 1.
+		HUDTEXT("WAITING BRAKES.", 10, 2, 30, GREEN, FALSE).
+	}
+		
+		if ap_stage = 1 
+		{
+			if SHIP:VELOCITY:SURFACE:MAG < 1
+			{
+				for _e in VTOLs{ SET _e:THRUSTLIMIT TO 100.}
+				set SHIP:control:pilotmainthrottle to ThrottleToTWR(2, VTOLs).
+				SET ap_stage to 2.
+				BRAKES OFF.
+				HUDTEXT("WAIT FOR TAKE OFF.", 10, 2, 30, GREEN, FALSE).
+			}
+		}
+	
+	if ap_stage = 2
+	{
+		if SHIP:BOUNDS:BOTTOMALTRADAR > 1
+		{
+			set SHIP:control:pilotmainthrottle to ThrottleToTWR(1.5, VTOLs).
+			SET ap_stage to 3.
+			HUDTEXT("WAITING FOR A SAFE ALTITUDE ON THE RADAR: 20m", 10, 2, 30, GREEN, FALSE).
+		}
+	}
+	if ap_stage = 3 
+	{
+		if SHIP:BOUNDS:BOTTOMALTRADAR > 20
+		{
+			HUDTEXT("ACTIVATE MAIN ENGINE", 10, 2, 30, GREEN, FALSE).
+			for _e in VTOLs
+			{
+				SET _e:THRUSTLIMIT TO ThrottleToTWR(1.0, VTOLs) * 100.
+			}
+			SET ap_stage to 4.
+			SET tgt_pitch to 5.
+			HUDTEXT("WAITING FOR A SAFE ALTITUDE ON THE RADAR 100m", 10, 2, 30, GREEN, FALSE).
+			HUDTEXT("WAITING FOR SPEED TO CLIMB 80m/s", 10, 2, 30, GREEN, FALSE).
+		}
+	}
+	
+	if ap_stage = 4
+	{
+		for _e in VTOLs{ 
+			SET _e:THRUSTLIMIT TO ThrottleToTWR(max(1, min(50 - SHIP:GROUNDSPEED/50, 0)), VTOLs) * 100.
+		}
+		if SHIP:VELOCITY:SURFACE:MAG > 80 and SHIP:BOUNDS:BOTTOMALTRADAR > 100
+		{
+			//SET tgt_pitch to 10.
+			SET ap_stage TO 0.
+			SET apm TO APM_NONE.
+			HUDTEXT("DEACTIVATE HOVER ENGINE", 10, 2, 30, GREEN, FALSE).
+			for _e in VTOLs{ 
+				SET _e:THRUSTLIMIT TO 0.
+			}
+			HUDTEXT("VERTICAL LAUNCH COMPLETE", 10, 2, 30, GREEN, FALSE).
+			SET tgt_pitch to 0.
+			set SHIP:CONTROL:NEUTRALIZE TO TRUE.
+		}
+	}		
+}
 
 function is_landed
 {
@@ -318,23 +329,55 @@ function on_holdH{
 		if changed {
 			if hLock{
 				set tgt_pitch to get_pitch().
-				HUDTEXT("Activate HOLD Horizontal PITCH " + ROUND(tgt_pitch, 1), 10, 2, 30, GREEN, TRUE).
+				HUDTEXT("Activate HOLD Horizontal PITCH " + ROUND(tgt_pitch, 1), 10, 2, 30, GREEN, FALSE).
 			}else{
 				set tgt_pitch to 1.
-				HUDTEXT("Deactivate HOLD Horizontal PITCH", 10, 2, 30, GREEN, TRUE).
+				HUDTEXT("Deactivate HOLD Horizontal PITCH", 10, 2, 30, GREEN, FALSE).
 			}
 		}
 	}
 }
 
-function UI{
-	ClearScreen.
-	PRINT "HTOL 1.0".
-	PRINT "Exit (X)".
-	PRINT "Activate Hold Horizontal PITCH (H)".
-	PRINT "Deactivate Hold Horizontal PITCH (N)".
+function updateState{
+	set timeS to TIME:SECONDS - oldTimeS.
+	set oldTimeS to TIME:SECONDS.
+	set nRoll to get_roll().
+	set nPitch to get_pitch().
+	set RollSpeed to (nRoll - oldRoll) / timeS.
+	set PitchSpeed to (nPitch - oldPitch) / timeS.
+	set oldPitch to nPitch.
+	set oldRoll to nRoll.
+	UI(false).
 }
 
+function UI{
+	parameter with_clear.
+	if (with_clear){
+		ClearScreen.
+		PRINT "HTOL 1.0".//0
+		PRINT "Exit (X)".//1
+		PRINT "Activate Hold Horizontal PITCH (H)".//2
+		PRINT "Deactivate Hold Horizontal PITCH (N)".//3
+		PRINT "----------------------------------------".//4
+		PRINT "PitchSpeed:  00000      RollSpeed: 00000".//5
+		PRINT "Pitch: 00000/00000      Roll 00000/00000".//6
+	}else{
+		PRINT "           " AT(13,5). PRINT "         " AT(36,5).//5
+		PRINT "     /     " AT(7,6). PRINT "     /     " AT(29,6).//6
+		PRINT ROUND(PitchSpeed, 3) AT(13,5). PRINT ROUND(RollSpeed, 3) AT(36,5).//5
+		PRINT ROUND(oldPitch,1) AT(7,6). PRINT  "/" + ROUND(tgt_pitch,1) AT(12,6). PRINT ROUND(oldRoll,1) AT(29,6). PRINT "/" + ROUND(tgt_roll,1) AT(34,6).//6
+	}
+}
+
+function vec_drw{
+	parameter __vector to ship:up:vector, __start to V(0, 0, 0), __color to RGB(1, 1, 1).
+	local drw to vecdraw().
+	set drw:start to __start.
+	set drw:vec to __vector.
+	set drw:color to __color.
+	set drw:show to TRUE.
+	return drw.
+}
 
 
 
