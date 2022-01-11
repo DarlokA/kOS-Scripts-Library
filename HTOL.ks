@@ -3,19 +3,26 @@ ClearScreen.
 local G is 0.
 lock G to SHIP:BODY:MU / ((SHIP:BODY:RADIUS+SHIP:ALTITUDE)^2).
 
-local oldTimeS to TIME:SECONDS.
+local mTimeS to TIME:SECONDS.
 
-local oldRoll to get_roll().
-local oldPitch to get_pitch().
+local mRoll to get_roll().
+local mPitch to get_pitch().
 
-local RollSpeed to 0.
-local PitchSpeed to 0.
+local mRollSpeed to 0.
+local mPitchSpeed to 0.
+
+local mDPitch to 0.
+local mDRoll to 0.
 
 local tgt_pitch TO get_pitch().
 local tgt_roll TO get_roll().
 
 
 GLOBAL hLock TO false.
+
+GLOBAL hLockStagePitch to 0.
+GLOBAL hLockStageRoll to 0.
+
 GLOBAL exit to false.
 
 GLOBAL APM_NONE 			TO 0.
@@ -60,7 +67,7 @@ until exit
 	if SHIP:CONTROL:PILOTFORE > 0.5	on_holdHE().
 	if SHIP:CONTROL:PILOTFORE < -0.5 on_holdHD().
 	
-	if hLock process_horizontal_lock(tgt_pitch, 0).
+	if hLock process_horizontal_lock().
 	
 	if apm = APM_PRELAUNCH ON_APM_PRELAUNCH().
 		
@@ -112,8 +119,8 @@ function ON_APM_HTLAUNCH{
 }
 
 function ON_APM_VTLAUNCH{
-	set tgt_pitch to oldPitch.
-	process_horizontal_lock(tgt_pitch, 0).
+	set tgt_pitch to 0.
+	process_horizontal_lock().
 	
 	if ap_stage = 0
 	{
@@ -215,76 +222,40 @@ function get_pitch{
 	return 90-VANG(ship:up:vector, ship:facing:forevector).
 }
 
+function process_lockRotate{
+	parameter vParams.
+	lock _hLockStage to vParams:X.
+	set _mSpeed to vParams:Y.
+	lock _control to vParams:Z.
+	if _hLockStage = 0 {
+		if _mSpeed > 0.1{
+			set _control to -0.2.
+			set _hLockStage to -2.
+		}else if _mSpeed < -0.1{
+			set _control to 0.2.
+			set _hLockStage to -2.
+		}else{
+			
+		}
+	}
+	return _hLockStage.
+	
+}
+
 function process_horizontal_lock{
-	parameter _tgt_pitch, _tgt_roll.
-	
-	
-	local magP to 0.05.
-	local magR to 0.05.
-	
-	local pitchA to get_pitch() - _tgt_pitch.
-	local rollA to get_roll() - _tgt_roll.
-	local cp to -pitchA * magP.
-	local cr to  -rollA * magR.
-	set wp to true.
-	set wr to true.
-	
-	local pP to cp.
-	local pR to cr.
-	
-	if ABS (pitchA) > 0.1
-	{
-		set SHIP:control:PITCH to cp.
-		set wp to false.
+	if SHIP:CONTROL:PILOTPITCH  <> 0 { set hLockStagePitch to 0. }
+	else{ 
+		set params to V(hLockStagePitch, mPitchSpeed, SHIP:control:PITCH)
+		set hLockStagePitch to process_lockRotate(params).
+		set SHIP:control:PITCH to params:Z.
 	}
 	
-	if ABS (rollA) > 0.1
-	{
-		set SHIP:control:ROLL to cr.
-		set wr to false.
+	if SHIP:CONTROL:PILOTROLL  <> 0 { set hLockStageRoll to 0. }
+	else{ 
+		set params to V(hLockStageRoll, mRollSpeed, SHIP:control:ROLL)
+		set hLockStageRoll to process_lockRotate(params).
+		set SHIP:control:ROLL to params:Z.
 	}
-	
-	wait 0.01.
-	set pitchA to get_pitch() - _tgt_pitch.
-	set cp to -pitchA*magP.
-	set rollA to get_roll() - _tgt_roll.
-	set cr to  -rollA*magR.
-	
-	set dp to ABS(cp - pp).
-	set dr to ABS(cr - pr).
-	
-	set mP to 1.
-	set mR to 1.
-	
-	set pP to cp.
-	set pR to cr.
-	
-	local startT to TIME:SECONDS.
-	until wp and wr{
-		
-		set pitchA to get_pitch() - _tgt_pitch.
-		set cp to -pitchA*magP.
-		set rollA to get_roll() - _tgt_roll.
-		set cr to  -rollA*magR.
-		
-		set dpN to ABS(cp - pp).
-		set drN to ABS(cr - pr).
-		
-		if dp > 0.00001 {set mP to dpN / dp.}else{ set mP to 2.}
-		if dr > 0.00001 {set mR to drN / dr.}else{ set mR to 2.}
-		
-		set dp to dpN.
-		set dr to drN.
-		
-		set pP to cp.
-		set pR to cr.
-		
-		set SHIP:control:PITCH to cp*mP.
-		set SHIP:control:ROLL to cr*mR.
-		if (ABS(pitchA) < 0.05) set wp to true.
-		if (ABS(rollA) < 0.05) set wr to true.
-	}
-	if wp and wr { set SHIP:CONTROL:NEUTRALIZE TO TRUE.}
 }
 
 
@@ -339,14 +310,22 @@ function on_holdH{
 }
 
 function updateState{
-	set timeS to TIME:SECONDS - oldTimeS.
-	set oldTimeS to TIME:SECONDS.
+	set timeS to TIME:SECONDS - mTimeS.
+	set mTimeS to TIME:SECONDS.
 	set nRoll to get_roll().
 	set nPitch to get_pitch().
-	set RollSpeed to (nRoll - oldRoll) / timeS.
-	set PitchSpeed to (nPitch - oldPitch) / timeS.
-	set oldPitch to nPitch.
-	set oldRoll to nRoll.
+	set nRollSpeed to (nRoll - mRoll) / timeS.
+	set nPitchSpeed to (nPitch - mPitch) / timeS.
+	
+	set mPitch to nPitch.
+	set mRoll to nRoll.
+	
+	set DPitch to nPitchSpeed - mPitchSpeed.
+	set DRoll to nRollSpeed - mRollSpeed.
+	
+	set mRollSpeed to nRollSpeed.
+	set mPitchSpeed to nPitchSpeed.
+	
 	UI(false).
 }
 
@@ -362,10 +341,10 @@ function UI{
 		PRINT "PitchSpeed:  00000      RollSpeed: 00000".//5
 		PRINT "Pitch: 00000/00000      Roll 00000/00000".//6
 	}else{
-		PRINT "           " AT(13,5). PRINT "         " AT(36,5).//5
+		PRINT "           " AT(13,5). PRINT "         " AT(35,5).//5
 		PRINT "     /     " AT(7,6). PRINT "     /     " AT(29,6).//6
-		PRINT ROUND(PitchSpeed, 3) AT(13,5). PRINT ROUND(RollSpeed, 3) AT(36,5).//5
-		PRINT ROUND(oldPitch,1) AT(7,6). PRINT  "/" + ROUND(tgt_pitch,1) AT(12,6). PRINT ROUND(oldRoll,1) AT(29,6). PRINT "/" + ROUND(tgt_roll,1) AT(34,6).//6
+		PRINT ROUND(mPitchSpeed, 3) AT(13,5). PRINT ROUND(mRollSpeed, 3) AT(35,5).//5
+		PRINT ROUND(mPitch,1) AT(7,6). PRINT  "/" + ROUND(tgt_pitch,1) AT(12,6). PRINT ROUND(mRoll,1) AT(29,6). PRINT "/" + ROUND(tgt_roll,1) AT(34,6).//6
 	}
 }
 
