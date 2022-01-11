@@ -249,7 +249,6 @@ function process_horizontal_lock{
 		set hLockStagePitch to process_lockRotate(params).
 		set SHIP:control:PITCH to params:Z.
 	}
-	
 	if SHIP:CONTROL:PILOTROLL  <> 0 { set hLockStageRoll to 0. }
 	else{ 
 		set params to V(hLockStageRoll, mRollSpeed, SHIP:control:ROLL)
